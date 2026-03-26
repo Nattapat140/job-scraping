@@ -18,7 +18,7 @@ MAX_PAGES = None
 HEADLESS = True
 SLOW_MO = 0
 TIMEOUT = 20_000
-NAV_TIMEOUT = 60_000
+NAV_TIMEOUT = 80_000
 
 # ---------------------------
 # CSV Metadata

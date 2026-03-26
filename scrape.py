@@ -1,6 +1,12 @@
+import asyncio
+
 from config import BASE_URL, JOBS_PER_PAGE, TIMEOUT, NAV_TIMEOUT, log
 from utils import clean_text, build_page_url, dismiss_overlays
 from playwright.async_api import TimeoutError as PlaywrightTimeout
+
+# Hard per-job timeout (seconds).  If navigating + extracting a single job
+# takes longer than this, the job is skipped.
+JOB_TIMEOUT_SEC = 60
 
 # ---------------------------------------------------------------------------
 # Core scraping logic
@@ -80,23 +86,40 @@ async def collect_job_urls(page) -> list[str]:
             pass
     return urls
 
+
+async def _scrape_single_job(page, job_url: str) -> dict | None:
+    """Navigate to a single job page and extract its details."""
+    await page.goto(job_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
+    await page.wait_for_timeout(1_500)
+
+    data = await extract_job_details(page, job_url)
+    if data and data.get("title"):
+        return data
+    return None
+
+
 async def scrape_page(page, page_num: int) -> list[dict]:
     """Scrape all job listings on a single page."""
     listing_url = build_page_url(page_num, BASE_URL)
     log.info(f"Navigating to page {page_num}: {listing_url}")
-    await page.goto(listing_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
 
-    # Wait for job links to appear
-    await page.wait_for_selector(
-        '[data-automation="job-list-view-job-link"]',
-        state="attached",
-        timeout=TIMEOUT,
-    )
-    # Wait for SPA hydration
-    await page.wait_for_timeout(3_000)
-
-    # Dismiss any cookie banners / overlays
-    await dismiss_overlays(page)
+    # --- Page-level navigation (non-fatal) -----------------------------------
+    try:
+        await page.goto(
+            listing_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT
+        )
+        await page.wait_for_selector(
+            '[data-automation="job-list-view-job-link"]',
+            state="attached",
+            timeout=TIMEOUT,
+        )
+        await page.wait_for_timeout(3_000)
+        await dismiss_overlays(page)
+    except (PlaywrightTimeout, Exception) as e:
+        log.warning(
+            f"Failed to load listing page {page_num}: {e} – skipping entire page."
+        )
+        return []
 
     # Collect all job URLs from the listing
     job_urls = await collect_job_urls(page)
@@ -107,13 +130,12 @@ async def scrape_page(page, page_num: int) -> list[dict]:
     for idx, job_url in enumerate(job_urls):
         log.info(f"  [{page_num}-{idx+1}/{len(job_urls)}] Visiting: {job_url[:80]}...")
         try:
-            # Navigate to the full job detail page
-            await page.goto(job_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
-            await page.wait_for_timeout(1_500)
-
-            # Extract details
-            data = await extract_job_details(page, job_url)
-            if data and data.get("title"):
+            # Enforce a hard per-job time limit
+            data = await asyncio.wait_for(
+                _scrape_single_job(page, job_url),
+                timeout=JOB_TIMEOUT_SEC,
+            )
+            if data:
                 data["page_number"] = page_num
                 data["index_on_page"] = idx + 1
                 page_results.append(data)
@@ -121,6 +143,10 @@ async def scrape_page(page, page_num: int) -> list[dict]:
             else:
                 log.warning(f"    ✗ Could not extract details for job #{idx+1}")
 
+        except asyncio.TimeoutError:
+            log.warning(
+                f"    ✗ Job #{idx+1} exceeded {JOB_TIMEOUT_SEC}s hard limit – skipping."
+            )
         except PlaywrightTimeout:
             log.warning(f"    ✗ Timeout on job #{idx+1} – skipping.")
         except Exception as e:
