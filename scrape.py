@@ -35,6 +35,20 @@ async def extract_job_details(page, job_url: str) -> dict:
             return clean_text(await el.inner_text())
         except Exception:
             return ""
+    
+    async def safe_text_exact(selector: str, exact: bool=True) -> str:
+        """Text matching on visible text
+        
+        Arguments:
+            selector (str): The text to search for (full or partial)
+            exact (bool): Whether to match the full text exactly (True) or allow partial matches (False)
+        """
+        try:
+            el = page.get_by_text(selector, exact=exact).first
+            await el.wait_for(state="attached", timeout=4_000)
+            return clean_text(await el.text_content())
+        except Exception:
+            return ""
 
     title = await safe_text('[data-automation="job-detail-title"]')
     if not title:
@@ -49,6 +63,9 @@ async def extract_job_details(page, job_url: str) -> dict:
     posted_date = await safe_text('[data-automation="job-detail-date"]')
     if not posted_date:
         posted_date = await safe_text('[data-automation="jobListingDate"]')
+    else:
+        # use visible text matching as a last resort.
+        posted_date = await safe_text_exact("ลงประกาศเมื่อ", exact=False)
 
     # --- Full job description (HTML → plain text) ----------------------------
     description = ""

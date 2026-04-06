@@ -54,3 +54,26 @@ Results are saved in the project directory with timestamps:
 | `job_url`     | Link to the job detail               |
 | `page_number` | Which listing page this was found on |
 | `index_on_page` | Position on that page (1-32)       |
+
+### Data Directory
+
+The `data/` folder is split into two parts:
+
+- `data/showcase/` contains small, curated samples that demonstrate the shape of the scraped output for other contributors.
+- `data/test/` contains larger or disposable datasets used for local testing and validation.
+
+`data/test/` is ignored by git to avoid accidentally uploading large datasets, which can slow down pull and push operations for everyone working on the project. Keep the showcase dataset intentionally small, ideally 1-2 pages of scraped data or fewer than 50 rows.
+
+#### Directory Chart
+
+```text
+data/
+├── showcase/
+│   ├── sample_jobs.csv
+│   └── sample_jobs.json
+└── test/
+	├── local_test_jobs.csv
+	└── local_test_jobs.json
+```
+
+Use `showcase/` when you want to document or demonstrate the expected data format, and use `test/` for temporary or larger local datasets that should not be committed.
